@@ -1,0 +1,22 @@
+# Don't commit your API keys or secrets
+.env
+.streamlit/secrets.toml
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore Python cache and virtual environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+
+# VS Code files
+.vscode/
+
+# Ignore virtual environments
+venv/
+rag-env/
