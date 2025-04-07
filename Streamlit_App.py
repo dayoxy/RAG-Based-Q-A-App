@@ -1,83 +1,60 @@
-# App.py
-
 import os
 from dotenv import load_dotenv, find_dotenv
 
-from langchain_community.document_loaders import UnstructuredPDFLoader
+import streamlit as st
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
-
-
-import gradio as gr
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
 
-# --- Load API Key ---
-env_path = find_dotenv()
-if not env_path:
-    print("❌ .env file not found.")
-else:
-    print("✅ .env loaded from:", env_path)
+# --- Load API Key from environment or Streamlit secrets ---
+load_dotenv(find_dotenv())
+openai_api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
 
-openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
-    print("❌ OpenAI API Key not found.")
-else:
-    print("✅ API Key loaded.")
+    st.error("OpenAI API key not found. Please add it to your .env or Streamlit secrets.")
+    st.stop()
 
-# --- Global QA Chain ---
+# --- Streamlit App ---
+st.set_page_config(page_title="RAG Q&A PDF App")
+st.title("📄 RAG-Based Q&A App")
+st.markdown("Upload a PDF and ask questions based on its content.")
+
+# --- PDF Upload ---
+uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
 qa_chain = None
 
-# --- Load and Chunk PDF ---
-def load_pdf(file):
-    loader = UnstructuredPDFLoader(file.name)
-    return loader.load_and_split()
+if uploaded_file:
+    with st.spinner("Processing PDF..."):
+        # Save the uploaded file to a temp location
+        with open("temp.pdf", "wb") as f:
+            f.write(uploaded_file.getbuffer())
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    return splitter.split_documents(pages)
+        # Load and split the document
+        loader = PyPDFLoader("temp.pdf")
+        raw_documents = loader.load()
 
-# --- Set Up Retrieval QA ---
-def setup_qa(docs):
-    embeddings = OpenAIEmbeddings()
-    vectorstore = FAISS.from_documents(docs, embeddings)
-    retriever = vectorstore.as_retriever()
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
-    return RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        documents = text_splitter.split_documents(raw_documents)
 
-# --- Upload Handler ---
-def upload_pdf(pdf):
-    global qa_chain
-    docs = load_pdf(pdf)
-    qa_chain = setup_qa(docs)
-    return "✅ PDF uploaded and ready! Ask your questions below."
+        # Vectorize and create retriever
+        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        vectorstore = FAISS.from_documents(documents, embeddings)
+        retriever = vectorstore.as_retriever()
 
-# --- Ask Question Handler ---
-def answer_question(question):
-    if qa_chain:
-        result = qa_chain({"query": question})
-        return result["result"]
-    return "❌ Please upload a PDF first."
+        # Setup LLM and chain
+        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0, openai_api_key=openai_api_key)
+        qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
-# --- Gradio Interface ---
-def create_interface():
-    with gr.Blocks() as demo:
-        gr.Markdown("# 📄 RAG-Based Q&A App\nUpload a PDF and ask questions.")
+        st.success("PDF processed. Ask a question below.")
 
-        file_input = gr.File(label="Upload PDF")
-        upload_btn = gr.Button("Process Document")
-        status_box = gr.Textbox(label="Status")
-
-        question_input = gr.Textbox(label="Ask a question")
-        answer_output = gr.Textbox(label="Answer")
-        ask_btn = gr.Button("Get Answer")
-
-        upload_btn.click(fn=upload_pdf, inputs=file_input, outputs=status_box)
-        ask_btn.click(fn=answer_question, inputs=question_input, outputs=answer_output)
-
-    return demo
-
-# --- Launch App ---
-if __name__ == "__main__":
-    app = create_interface()
-    app.launch()
+# --- Q&A Interface ---
+if qa_chain:
+    question = st.text_input("Ask a question about the document:")
+    if question:
+        with st.spinner("Generating answer..."):
+            result = qa_chain({"query": question})
+            st.markdown("### ✅ Answer")
+            st.write(result["result"])
