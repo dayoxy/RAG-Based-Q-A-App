@@ -7,3 +7,4 @@ tiktoken
 unstructured
 streamlit
 PyPDF2
+python-dotenv
